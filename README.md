@@ -585,3 +585,34 @@ One heads-up from the inside: build in this space for a week and you learn that 
 **🌐 God's Eye View. No place left behind.**
 
 </div>
+
+---
+
+## 🐳 Docker Compose
+
+The published image is `ghcr.io/seanashe/gods-eye-view`. It listens on port
+**4173** inside the container (`HOST=0.0.0.0`). Keys stay runtime environment
+variables — copy [`.env.example`](.env.example) to `.env` and fill in only what
+you want. The app starts keyless if that file is absent.
+
+Save this as `compose.yaml` next to `.env` and run `docker compose up -d`.
+Then open **`http://127.0.0.1:4173`**.
+
+```yaml
+services:
+  gods-eye-view:
+    image: ghcr.io/seanashe/gods-eye-view:latest
+    # Build this checkout instead of pulling the published image:
+    # build: .
+    ports:
+      - "127.0.0.1:4173:4173"
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+```
+
+The host port is bound to **127.0.0.1**, so other machines cannot reach the
+key-brokering server. To share it on a trusted LAN, publish `4173:4173` and,
+for a hostname, set `GEV_ALLOWED_HOSTS`. See
+[Sharing an instance](#-sharing-an-instance).
