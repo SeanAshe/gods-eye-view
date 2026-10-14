@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.log
+screenshots
+qa-shots
+qa-artifacts
+output
+.gev-logs
+.gev-cache
+docs/media
+**/.DS_Store

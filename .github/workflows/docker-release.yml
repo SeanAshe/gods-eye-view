@@ -1,0 +1,161 @@
+name: Upstream release image
+
+# Lives on the default branch. Every six hours, compare the upstream
+# repository's latest GitHub release with the container tags already published
+# from this fork. A new release syncs this fork's default branch, then builds
+# that tagged source and pushes the image to GHCR.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and push even when this release tag is already published
+        type: boolean
+        default: false
+
+concurrency:
+  group: upstream-release-image
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check upstream release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      publish: ${{ steps.meta.outputs.publish }}
+      upstream: ${{ steps.meta.outputs.upstream }}
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Compare the latest upstream release with published tags
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+
+          upstream=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.parent.full_name // empty')
+          if [ -z "$upstream" ]; then
+            echo "This workflow only runs in a fork of the upstream project." >&2
+            exit 1
+          fi
+
+          tag=$(gh api "repos/${upstream}/releases/latest" --jq .tag_name)
+          if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+            echo "Refusing unexpected release tag: ${tag}" >&2
+            exit 1
+          fi
+
+          owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          package=$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/${package}"
+
+          published=false
+          err=$(mktemp)
+          set +e
+          tags=$(gh api --paginate "/users/${owner}/packages/container/${package}/versions" --jq '.[].metadata.container.tags[]?' 2>"$err")
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            if printf '%s\n' "$tags" | grep -Fxq "$tag"; then
+              published=true
+            fi
+          elif grep -Eq 'HTTP 404|Not Found' "$err"; then
+            published=false
+          else
+            cat "$err" >&2
+            exit "$status"
+          fi
+
+          publish=false
+          if [ "$FORCE" = "true" ] || [ "$published" = "false" ]; then
+            publish=true
+          fi
+
+          {
+            echo "tag=${tag}"
+            echo "publish=${publish}"
+            echo "upstream=${upstream}"
+            echo "image=${image}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Upstream ${upstream} latest release ${tag}; image tag published=${published}; will publish=${publish}."
+
+  publish:
+    name: Sync fork and publish image
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: write
+      contents: write
+      packages: write
+    steps:
+      - name: Sync fork with upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch=$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/merge-upstream" -f branch="$branch"
+
+      - name: Check out packaging files
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Check out the upstream release
+        id: source
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
+          UPSTREAM: ${{ needs.check.outputs.upstream }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/gev-packaging
+          cp Dockerfile .dockerignore /tmp/gev-packaging/
+          rm -rf build-context
+          git init -b main build-context
+          git -C build-context fetch --depth 1 "https://github.com/${UPSTREAM}.git" "refs/tags/${TAG}:refs/tags/${TAG}"
+          git -C build-context checkout --detach "$TAG"
+          sha=$(git -C build-context rev-parse HEAD)
+          rm -rf build-context/.git
+          cp /tmp/gev-packaging/Dockerfile /tmp/gev-packaging/.dockerignore build-context/
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: build-context
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ needs.check.outputs.image }}:${{ needs.check.outputs.tag }}
+            ${{ needs.check.outputs.image }}:latest
+          build-args: |
+            GEV_VERSION=${{ needs.check.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.version=${{ needs.check.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
