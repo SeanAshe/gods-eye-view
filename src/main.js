@@ -1,5 +1,8 @@
 import { createStandaloneApplication } from './standalone/application.js';
 import { describeError } from './standalone/errors.js';
+import { installUiLocale } from './i18n/install.js';
+
+installUiLocale();
 
 const application = createStandaloneApplication({
   googleApiKey: import.meta.env.GOOGLE_MAPS_API_KEY,

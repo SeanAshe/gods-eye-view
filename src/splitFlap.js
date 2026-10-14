@@ -1,3 +1,6 @@
+import { getUiLocale } from './i18n/locale.js';
+import { translateUiText } from './i18n/translate.js';
+
 /**
  * Split-flap (departure-board) text animation for the status chips.
  *
@@ -84,6 +87,8 @@ export const FLAP_TURN_RATIO = 0.5;
 const HOST_CLASS = 'gev-flap-host';
 const ACTIVE_CLASS = 'gev-flap-active';
 const TEXT_CLASS = 'gev-flap-text';
+const flapLabels = new Set();
+const flapSources = new WeakMap();
 const CELLS_CLASS = 'gev-flap-cells';
 const CELL_CLASS = 'gev-flap-cell';
 const FLAPPING_CLASS = 'is-flapping';
@@ -431,6 +436,23 @@ function settle(element, expected, easeMs) {
   easeWidth(element, cascadeWidth, naturalWidth, easeMs);
 }
 
+function displayFlapText(text) {
+  const raw = String(text ?? '');
+  return getUiLocale() === 'zh' ? translateUiText(raw) : raw;
+}
+
+/** Reapply stored chip labels after the UI language changes. */
+export function retranslateSplitFlaps() {
+  for (const element of flapLabels) {
+    if (!element.isConnected) {
+      flapLabels.delete(element);
+      continue;
+    }
+    const raw = flapSources.get(element);
+    if (raw != null) setSplitFlapText(element, raw, { immediate: true });
+  }
+}
+
 /**
  * Set a chip label, flipping the changed characters into place.
  *
@@ -446,7 +468,10 @@ function settle(element, expected, easeMs) {
  */
 export function setSplitFlapText(element, text, options = {}) {
   if (!element) return false;
-  const next = String(text ?? '');
+  const raw = String(text ?? '');
+  flapLabels.add(element);
+  flapSources.set(element, raw);
+  const next = displayFlapText(raw);
   // Upgrade to the permanent shell FIRST, so that one-time structural change
   // happens on a tick where the text is not changing. Every subsequent label
   // change is then a lone characterData mutation (invariant 1).

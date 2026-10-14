@@ -372,6 +372,29 @@
   opacity: 1;
 }
 
+/* ── Language ─────────────────────────────────── */
+#gev-lang-toggle {
+  position: fixed;
+  top: 6px;
+  right: 36px;
+  z-index: 1100;
+  padding: 4px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass-bg);
+  color: var(--accent);
+  font:
+    600 12px/1 'JetBrains Mono',
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+#gev-lang-toggle:hover {
+  border-color: var(--accent);
+}
+
 /* ── Loading Screen ───────────────────────────── */
 #loading-screen {
   position: fixed;
