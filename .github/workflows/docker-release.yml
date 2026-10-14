@@ -150,7 +150,6 @@ jobs:
           sbom: false
           tags: |
             ${{ needs.check.outputs.image }}:${{ needs.check.outputs.tag }}
-            ${{ needs.check.outputs.image }}:latest
           build-args: |
             GEV_VERSION=${{ needs.check.outputs.tag }}
           labels: |
